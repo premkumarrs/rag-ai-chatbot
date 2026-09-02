@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+psycopg[binary]
+pgvector
+langchain
+langchain-core
+langchain-ollama
+langchain-text-splitters
+pypdf
+python-docx
+openpyxl
+python-pptx
+beautifulsoup4
+pytesseract
+Pillow
