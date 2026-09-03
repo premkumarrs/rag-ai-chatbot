@@ -6,7 +6,9 @@ from collections.abc import Iterator
 
 from app.generator import GenerationResult, generate_answer, stream_answer_tokens
 from app.request_context import RequestMetrics, StageTimer, resolve_request_id
-from app.retriever import retrieve
+from app.retrieval.models import ConfidenceLevel
+from app.retrieval.pipeline import candidates_to_public_chunks, run_retrieval
+from app.retriever import RetrievedChunk
 
 
 def answer_question(
@@ -28,11 +30,23 @@ def answer_question(
         metrics.log_summary()
         return result
 
-    retrieved_chunks = retrieve(question, metrics=metrics)
+    assembled = run_retrieval(question, metrics=metrics)
+    metrics.extra["confidence"] = assembled.confidence.value
+
+    # LOW confidence → grounded fallback (no unsupported generation).
+    if assembled.confidence == ConfidenceLevel.LOW or not assembled.chunks:
+        result = generate_answer(question, [], metrics=metrics)
+        metrics.postprocess_ms = StageTimer().elapsed_ms()
+        metrics.total_ms = total_timer.elapsed_ms()
+        metrics.log_summary()
+        return result
+
+    retrieved_chunks: list[RetrievedChunk] = candidates_to_public_chunks(
+        assembled.chunks
+    )  # type: ignore[assignment]
     result = generate_answer(question, retrieved_chunks, metrics=metrics)
 
-    postprocess_timer = StageTimer()
-    metrics.postprocess_ms = postprocess_timer.elapsed_ms()
+    metrics.postprocess_ms = StageTimer().elapsed_ms()
     metrics.total_ms = total_timer.elapsed_ms()
     metrics.log_summary()
     return result
@@ -58,12 +72,24 @@ def stream_answer_question(
         metrics.log_summary()
         return
 
-    retrieved_chunks = retrieve(question, metrics=metrics)
+    assembled = run_retrieval(question, metrics=metrics)
+    metrics.extra["confidence"] = assembled.confidence.value
+
+    if assembled.confidence == ConfidenceLevel.LOW or not assembled.chunks:
+        for event in stream_answer_tokens(question, [], metrics=metrics):
+            yield event
+        metrics.postprocess_ms = StageTimer().elapsed_ms()
+        metrics.total_ms = total_timer.elapsed_ms()
+        metrics.log_summary()
+        return
+
+    retrieved_chunks: list[RetrievedChunk] = candidates_to_public_chunks(
+        assembled.chunks
+    )  # type: ignore[assignment]
 
     for event in stream_answer_tokens(question, retrieved_chunks, metrics=metrics):
         yield event
 
-    postprocess_timer = StageTimer()
-    metrics.postprocess_ms = postprocess_timer.elapsed_ms()
+    metrics.postprocess_ms = StageTimer().elapsed_ms()
     metrics.total_ms = total_timer.elapsed_ms()
     metrics.log_summary()

@@ -28,10 +28,12 @@ class RequestMetrics:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def log_summary(self) -> None:
+        extra = self.extra or {}
         logger.info(
             "request_id=%s provider=%s model=%s embedding_ms=%s retrieval_ms=%s "
             "prompt_ms=%s generation_ms=%s postprocess_ms=%s total_ms=%s "
-            "time_to_first_token_ms=%s",
+            "time_to_first_token_ms=%s confidence=%s vector_ms=%s keyword_ms=%s "
+            "fusion_rerank_ms=%s candidates=%s selected=%s normalized_len=%s",
             self.request_id,
             self.provider,
             self.model,
@@ -42,6 +44,15 @@ class RequestMetrics:
             _format_ms(self.postprocess_ms),
             _format_ms(self.total_ms),
             _format_ms(self.time_to_first_token_ms),
+            extra.get("confidence", "-"),
+            extra.get("vector_ms", "-"),
+            extra.get("keyword_ms", "-"),
+            extra.get("fusion_rerank_ms", "-"),
+            extra.get("fused_candidates", "-"),
+            extra.get("selected_chunks", "-"),
+            len(str(extra.get("normalized_query", "")))
+            if extra.get("normalized_query") is not None
+            else "-",
         )
 
 

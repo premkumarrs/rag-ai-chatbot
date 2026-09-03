@@ -59,6 +59,21 @@ def _extract_sources(chunks: list[RetrievedChunk]) -> list[str]:
     return sources
 
 
+def _format_source_header(chunk: RetrievedChunk) -> str:
+    parts = [f"Source: {chunk['source_path']}"]
+    if chunk.get("file_type"):
+        parts.append(f"Type: {chunk['file_type']}")
+    if chunk.get("page_number") is not None:
+        parts.append(f"Page: {chunk['page_number']}")
+    if chunk.get("sheet_name"):
+        parts.append(f"Sheet: {chunk['sheet_name']}")
+    if chunk.get("slide_number") is not None:
+        parts.append(f"Slide: {chunk['slide_number']}")
+    if chunk.get("section"):
+        parts.append(f"Section: {chunk['section']}")
+    return " | ".join(parts)
+
+
 def _build_user_message(question: str, chunks: list[RetrievedChunk]) -> str:
     context_blocks: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
@@ -66,7 +81,7 @@ def _build_user_message(question: str, chunks: list[RetrievedChunk]) -> str:
             "\n".join(
                 [
                     f"--- Context {index} ---",
-                    f"Source: {chunk['source_path']}",
+                    _format_source_header(chunk),
                     chunk["content"],
                 ]
             )

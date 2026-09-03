@@ -74,4 +74,34 @@ def init_db() -> None:
                 """
             )
 
+            # Full-text search support for hybrid keyword retrieval.
+            # Generated column is computed for existing rows automatically.
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'document_chunks'
+                          AND column_name = 'content_tsv'
+                    ) THEN
+                        ALTER TABLE document_chunks
+                        ADD COLUMN content_tsv tsvector
+                        GENERATED ALWAYS AS (
+                            to_tsvector('english', coalesce(content, ''))
+                        ) STORED;
+                    END IF;
+                END
+                $$;
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS document_chunks_content_tsv_idx
+                    ON document_chunks
+                    USING GIN (content_tsv);
+                """
+            )
+
         conn.commit()

@@ -15,6 +15,9 @@ A company-oriented Retrieval-Augmented Generation (RAG) chatbot that answers que
 - Document metadata (page, sheet, slide, section, etc.)
 - SHA-256 content hashing and idempotent ingestion
 - Similarity-threshold retrieval with grounded fallback when confidence is low
+- Hybrid retrieval (vector + PostgreSQL keyword/full-text)
+- Lightweight query normalization and deterministic reranking
+- Retrieval confidence (HIGH / MEDIUM / LOW) with context assembly
 - Streaming chat endpoint (`POST /chat/stream`)
 - LLM provider abstraction (Ollama today; swappable for a future company GPU endpoint)
 
@@ -26,13 +29,30 @@ Documents
   → Chunking
   → Embeddings
   → PostgreSQL + pgvector
-  → Retrieval
-  → Context
+
+User Question
+  → Query normalization
+  → Hybrid retrieval (vector + keyword)
+  → Candidate fusion
+  → Lightweight reranking
+  → Retrieval confidence
+  → Context assembly
   → Qwen LLM
   → Grounded Answer
 ```
 
 The LLM layer uses a provider interface so the inference backend can later be switched to another approved local or company-hosted model endpoint without rewriting the RAG pipeline.
+
+### Retrieval
+
+- **Vector retrieval** — semantic search over pgvector embeddings
+- **Keyword retrieval** — PostgreSQL full-text search plus exact technical-term matching
+- **Hybrid fusion** — combines both result sets (Reciprocal Rank Fusion)
+- **Lightweight reranking** — deterministic reordering of the small candidate set (no extra LLM call)
+- **Retrieval confidence** — HIGH / MEDIUM / LOW based on candidate quality; LOW triggers grounded fallback
+- **Grounded fallback** — answers only from retrieved company context; otherwise returns a support message
+
+Query normalization is deterministic (informal wording, light typos). Technical identifiers such as `ADXL345`, `ESP32`, and `C-MAPSS` are preserved.
 
 ## Supported Documents
 
@@ -149,8 +169,8 @@ When `fallback` is `true`, the knowledge base did not contain sufficient relevan
 python -m unittest discover -s tests -p "test_*.py" -q
 ```
 
-Tests cover document parsers (PDF, DOCX, TXT, MD, CSV, XLSX, PPTX, HTML, JSON), chunking, idempotent ingestion, OCR availability, file discovery, partial failure handling, LLM provider wiring, and RAG orchestration.
+Tests cover document parsers, chunking, idempotent ingestion, OCR availability, hybrid retrieval (normalization, fusion, reranking, confidence, context assembly), LLM provider wiring, and RAG orchestration.
 
 ## Project Status
 
-The current implementation includes the core RAG pipeline, multi-format ingestion, metadata-aware chunking, and OCR support. Future work may add hybrid retrieval, reranking, and other retrieval-quality improvements—these are not part of the current scope.
+The current implementation includes the core RAG pipeline, multi-format ingestion with OCR, and Phase 3 intelligent hybrid retrieval (vector + keyword, fusion, lightweight reranking, retrieval confidence, and context assembly). Production load testing and advanced model-based rerankers are out of scope for now.

@@ -88,20 +88,38 @@ class GeneratorTests(unittest.TestCase):
 
 class RagOrchestrationTests(unittest.TestCase):
     def test_empty_question_does_not_call_retriever(self) -> None:
-        with patch("app.rag.retrieve") as mock_retrieve:
+        with patch("app.rag.run_retrieval") as mock_retrieve:
             result = answer_question("   ", request_id="test-empty")
             mock_retrieve.assert_not_called()
         self.assertTrue(result["fallback"])
         self.assertEqual(result["answer"], "Please provide a question.")
 
     @patch("app.rag.generate_answer")
-    @patch("app.rag.retrieve")
+    @patch("app.rag.run_retrieval")
     def test_supported_flow_calls_retrieval_then_generation(
         self,
         mock_retrieve: MagicMock,
         mock_generate: MagicMock,
     ) -> None:
-        mock_retrieve.return_value = [{"content": "x", "source_path": "data/a.docx", "distance": 0.1, "similarity": 0.9}]
+        from app.retrieval.models import AssembledContext, ConfidenceLevel, RetrievalCandidate
+
+        mock_retrieve.return_value = AssembledContext(
+            chunks=[
+                RetrievalCandidate(
+                    chunk_id=1,
+                    document_id=1,
+                    content="x",
+                    source_path="data/a.docx",
+                    similarity=0.9,
+                    distance=0.1,
+                    retrieval_methods={"vector"},
+                )
+            ],
+            total_chars=1,
+            confidence=ConfidenceLevel.HIGH,
+            normalized_query="Supported?",
+            candidate_count=1,
+        )
         mock_generate.return_value = {
             "answer": "Answer",
             "sources": ["data/a.docx"],
@@ -114,13 +132,21 @@ class RagOrchestrationTests(unittest.TestCase):
         self.assertFalse(result["fallback"])
 
     @patch("app.rag.generate_answer")
-    @patch("app.rag.retrieve")
+    @patch("app.rag.run_retrieval")
     def test_unsupported_flow_still_reaches_generator_for_fallback(
         self,
         mock_retrieve: MagicMock,
         mock_generate: MagicMock,
     ) -> None:
-        mock_retrieve.return_value = []
+        from app.retrieval.models import AssembledContext, ConfidenceLevel
+
+        mock_retrieve.return_value = AssembledContext(
+            chunks=[],
+            total_chars=0,
+            confidence=ConfidenceLevel.LOW,
+            normalized_query="What is the capital of France?",
+            candidate_count=0,
+        )
         mock_generate.return_value = {
             "answer": "Fallback answer",
             "sources": [],
@@ -130,6 +156,8 @@ class RagOrchestrationTests(unittest.TestCase):
         result = answer_question("What is the capital of France?", request_id="test-unsupported")
         self.assertTrue(result["fallback"])
         self.assertEqual(result["sources"], [])
+        mock_generate.assert_called_once()
+        self.assertEqual(mock_generate.call_args.args[1], [])
 
 
 class RequestContextTests(unittest.TestCase):

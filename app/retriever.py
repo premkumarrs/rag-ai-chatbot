@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
@@ -11,9 +11,10 @@ from langchain_ollama import OllamaEmbeddings
 from pgvector import Vector
 from pydantic import ConfigDict
 
-from app.config import EMBEDDING_MODEL, OLLAMA_HOST, RETRIEVAL_MIN_SIMILARITY, TOP_K
-from app.database import get_connection
-from app.request_context import RequestMetrics, StageTimer
+from app.config import TOP_K
+from app.request_context import RequestMetrics
+from app.retrieval.pipeline import candidates_to_public_chunks, run_retrieval
+from app.retrieval.vector import get_embeddings, vector_search
 
 
 class RetrievedChunk(TypedDict):
@@ -21,49 +22,21 @@ class RetrievedChunk(TypedDict):
     source_path: str
     distance: float
     similarity: float
-
-
-def get_embeddings() -> OllamaEmbeddings:
-    return OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_HOST)
-
-
-def _search_documents(query_embedding: Vector, top_k: int) -> list[Document]:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    dc.content,
-                    d.source_path,
-                    dc.embedding <=> %s AS distance
-                FROM document_chunks AS dc
-                INNER JOIN documents AS d ON d.id = dc.document_id
-                ORDER BY dc.embedding <=> %s
-                LIMIT %s;
-                """,
-                (query_embedding, query_embedding, top_k),
-            )
-            rows = cur.fetchall()
-
-    documents: list[Document] = []
-    for content, source_path, distance in rows:
-        distance_value = float(distance)
-        similarity = 1.0 - distance_value
-        documents.append(
-            Document(
-                page_content=content,
-                metadata={
-                    "source_path": source_path,
-                    "distance": distance_value,
-                    "similarity": similarity,
-                },
-            )
-        )
-    return documents
+    chunk_id: NotRequired[int]
+    document_id: NotRequired[int]
+    keyword_score: NotRequired[float | None]
+    combined_score: NotRequired[float]
+    retrieval_methods: NotRequired[list[str]]
+    filename: NotRequired[str | None]
+    file_type: NotRequired[str | None]
+    page_number: NotRequired[int | None]
+    sheet_name: NotRequired[str | None]
+    slide_number: NotRequired[int | None]
+    section: NotRequired[str | None]
 
 
 class PgVectorRetriever(BaseRetriever):
-    """LangChain retriever backed by the existing PostgreSQL + pgvector schema."""
+    """LangChain retriever backed by PostgreSQL + pgvector (vector path)."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -76,18 +49,21 @@ class PgVectorRetriever(BaseRetriever):
         *,
         run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
-        query_embedding = Vector(self.embeddings.embed_query(query))
-        return _search_documents(query_embedding, self.top_k)
-
-
-def _document_to_chunk(document: Document) -> RetrievedChunk:
-    metadata = document.metadata
-    return {
-        "content": document.page_content,
-        "source_path": str(metadata["source_path"]),
-        "distance": float(metadata["distance"]),
-        "similarity": float(metadata["similarity"]),
-    }
+        candidates = vector_search(query, top_k=self.top_k)
+        documents: list[Document] = []
+        for candidate in candidates:
+            documents.append(
+                Document(
+                    page_content=candidate.content,
+                    metadata={
+                        "source_path": candidate.source_path,
+                        "distance": candidate.distance,
+                        "similarity": candidate.similarity,
+                        "chunk_id": candidate.chunk_id,
+                    },
+                )
+            )
+        return documents
 
 
 def retrieve(
@@ -95,25 +71,22 @@ def retrieve(
     top_k: int | None = None,
     metrics: RequestMetrics | None = None,
 ) -> list[RetrievedChunk]:
-    """Return the most relevant stored chunks for a question."""
-    limit = TOP_K if top_k is None else top_k
-    embeddings = get_embeddings()
+    """
+    Return the most relevant stored chunks for a question.
 
-    embed_timer = StageTimer()
-    query_embedding = Vector(embeddings.embed_query(question))
-    if metrics is not None:
-        metrics.embedding_ms = embed_timer.elapsed_ms()
+    Uses hybrid vector + keyword retrieval with fusion, lightweight reranking,
+    confidence gating, and context assembly.
+    """
+    assembled = run_retrieval(question, metrics=metrics, final_top_k=top_k)
+    public_chunks = candidates_to_public_chunks(assembled.chunks)
+    return public_chunks  # type: ignore[return-value]
 
-    retrieval_timer = StageTimer()
-    documents = _search_documents(query_embedding, limit)
-    if metrics is not None:
-        metrics.retrieval_ms = retrieval_timer.elapsed_ms()
 
-    results: list[RetrievedChunk] = []
-    for document in documents:
-        similarity = float(document.metadata["similarity"])
-        if similarity < RETRIEVAL_MIN_SIMILARITY:
-            continue
-        results.append(_document_to_chunk(document))
-
-    return results
+# Re-export for callers that still construct embeddings directly.
+__all__ = [
+    "PgVectorRetriever",
+    "RetrievedChunk",
+    "get_embeddings",
+    "retrieve",
+    "Vector",
+]
