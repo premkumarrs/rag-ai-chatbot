@@ -188,17 +188,16 @@ class OCRTests(unittest.TestCase):
 
 
 class DiscoveryTests(unittest.TestCase):
-    def test_nested_directory_discovery(self) -> None:
+    def test_only_top_level_files_are_discovered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            (root / "readme.txt").write_text("Top level", encoding="utf-8")
             nested = root / "support"
             nested.mkdir()
             (nested / "faq.txt").write_text("Help text", encoding="utf-8")
-            cache_dir = root / "__pycache__"
-            cache_dir.mkdir()
-            (cache_dir / "ignore.txt").write_text("ignore", encoding="utf-8")
             files = discover_files(root)
             self.assertEqual(len(files), 1)
+            self.assertEqual(files[0].name, "readme.txt")
 
 
 class PartialFailureTests(unittest.TestCase):

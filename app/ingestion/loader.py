@@ -10,7 +10,6 @@ from app.ingestion.parsers import EXTENSION_TO_PARSER, SUPPORTED_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
-IGNORED_DIR_NAMES = {".venv", "__pycache__", ".git"}
 IGNORED_FILE_NAMES = {".env", ".gitignore"}
 IGNORED_EXTENSIONS = {
     ".exe",
@@ -34,11 +33,13 @@ def to_source_path(file_path: Path, source_root: Path) -> str:
 
 
 def discover_files(data_dir: Path) -> list[Path]:
+    """Discover supported files only in data_dir itself (no subfolders)."""
+    if not data_dir.is_dir():
+        return []
+
     discovered: list[Path] = []
-    for path in sorted(data_dir.rglob("*")):
+    for path in sorted(data_dir.iterdir()):
         if not path.is_file():
-            continue
-        if any(part in IGNORED_DIR_NAMES for part in path.parts):
             continue
         if path.name in IGNORED_FILE_NAMES:
             continue

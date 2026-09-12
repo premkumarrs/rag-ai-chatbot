@@ -69,7 +69,7 @@ Query normalization is deterministic (informal wording, light typos). Technical 
 | JSON | `.json` |
 | Images (OCR) | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff` |
 
-Place files under `data/` (subfolders are supported). Ingestion runs offline before queries. The `data/` directory is gitignored—do not commit company documents.
+Place files directly under `data/` (subfolders are ignored). Ingestion runs offline before queries. The `data/` directory is gitignored—do not commit company documents.
 
 ## Setup
 
@@ -156,7 +156,7 @@ winget install UB-Mannheim.TesseractOCR
 ```json
 {
   "answer": "...",
-  "sources": ["data/policies/warranty.docx"],
+  "sources": ["data/warranty.docx"],
   "fallback": false
 }
 ```
