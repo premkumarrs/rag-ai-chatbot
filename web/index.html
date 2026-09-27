@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Document assistant</title>
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --ink: #1c1915;
+      --muted: #6b645b;
+      --line: #e2dacd;
+      --card: #fffcf7;
+      --accent: #0f6e56;
+      --accent-ink: #f4fff9;
+      --user: #e7f3ee;
+      --warn: #8a4b12;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(900px 420px at 10% -10%, #efe4c8 0%, transparent 60%),
+        var(--bg);
+    }
+
+    .shell {
+      max-width: 760px;
+      margin: 0 auto;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 28px 20px 20px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.45rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+
+    header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    #log {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin: 24px 0;
+    }
+
+    .msg {
+      max-width: 88%;
+      padding: 12px 14px;
+      border-radius: 14px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background: var(--user);
+    }
+
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--card);
+      border: 1px solid var(--line);
+    }
+
+    .msg.pending {
+      color: var(--muted);
+    }
+
+    .sources {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    form {
+      display: flex;
+      gap: 8px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 8px;
+    }
+
+    textarea {
+      flex: 1;
+      border: 0;
+      resize: none;
+      min-height: 48px;
+      max-height: 140px;
+      padding: 10px 8px;
+      font: inherit;
+      background: transparent;
+      color: inherit;
+      outline: none;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 0 16px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <h1>Document assistant</h1>
+      <p>Answers come from the files in <code>data/</code>. The first reply can take a moment while the local model loads.</p>
+    </header>
+    <div id="log" aria-live="polite"></div>
+    <form id="composer">
+      <textarea id="question" rows="2" placeholder="Ask about your documents" required></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </div>
+  <script>
+    const API = "http://127.0.0.1:8000/chat/stream";
+    const log = document.getElementById("log");
+    const form = document.getElementById("composer");
+    const question = document.getElementById("question");
+    const send = document.getElementById("send");
+
+    function addMessage(role, text) {
+      const node = document.createElement("div");
+      node.className = "msg " + role;
+      node.textContent = text;
+      log.appendChild(node);
+      log.scrollTop = log.scrollHeight;
+      return node;
+    }
+
+    function setSources(node, sources, fallback) {
+      if (!sources || sources.length === 0) return;
+      const line = document.createElement("div");
+      line.className = "sources";
+      line.textContent = (fallback ? "No matching document. " : "Sources: ") + sources.join(", ");
+      node.appendChild(line);
+    }
+
+    async function ask(text) {
+      addMessage("user", text);
+      const reply = addMessage("assistant pending", "Searching your documents…");
+      send.disabled = true;
+      let started = false;
+
+      try {
+        const response = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: text }),
+        });
+        if (!response.ok || !response.body) {
+          throw new Error("The assistant could not be reached.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() || "";
+          for (const frame of frames) {
+            const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+            if (!dataLine) continue;
+            const event = JSON.parse(dataLine.slice(6));
+            if (event.type === "token" && event.text) {
+              if (!started) {
+                reply.textContent = "";
+                reply.classList.remove("pending");
+                started = true;
+              }
+              reply.textContent += event.text;
+              log.scrollTop = log.scrollHeight;
+            } else if (event.type === "complete") {
+              if (!started) {
+                reply.textContent = event.answer || "";
+                reply.classList.remove("pending");
+              }
+              setSources(reply, event.sources, event.fallback);
+            } else if (event.type === "error") {
+              reply.textContent = event.detail || "Something went wrong.";
+              reply.classList.remove("pending");
+            }
+          }
+        }
+      } catch (error) {
+        reply.textContent = error.message || "Something went wrong.";
+        reply.classList.remove("pending");
+      } finally {
+        send.disabled = false;
+        question.focus();
+      }
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = question.value.trim();
+      if (!text || send.disabled) return;
+      question.value = "";
+      ask(text);
+    });
+
+    question.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+  </script>
+</body>
+</html>

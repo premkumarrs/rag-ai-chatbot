@@ -10,7 +10,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Huma
 from langchain_ollama import ChatOllama
 
 from app.config import (
+    LLM_KEEP_ALIVE,
     LLM_MAX_OUTPUT_TOKENS,
+    LLM_NUM_CTX,
+    LLM_PRESENCE_PENALTY,
     LLM_REASONING_ENABLED,
     LLM_REQUEST_TIMEOUT,
     LLM_TEMPERATURE,
@@ -60,6 +63,17 @@ def _extract_finish_reason(metadata: dict[str, Any]) -> str | None:
     return str(finish_reason) if finish_reason else None
 
 
+class _ChatOllama(ChatOllama):
+    """ChatOllama that also sends presence_penalty on every request."""
+
+    def _chat_params(self, messages: list[BaseMessage], stop: list[str] | None = None, **kwargs: Any) -> dict[str, Any]:
+        params = super()._chat_params(messages, stop=stop, **kwargs)
+        options = dict(params.get("options") or {})
+        options["presence_penalty"] = LLM_PRESENCE_PENALTY
+        params["options"] = options
+        return params
+
+
 class OllamaProvider(LLMProvider):
     def __init__(self) -> None:
         reasoning: bool | None
@@ -68,11 +82,13 @@ class OllamaProvider(LLMProvider):
         else:
             reasoning = False
 
-        self._client = ChatOllama(
+        self._client = _ChatOllama(
             model=OLLAMA_MODEL,
             base_url=OLLAMA_BASE_URL,
             temperature=LLM_TEMPERATURE,
             num_predict=LLM_MAX_OUTPUT_TOKENS,
+            num_ctx=LLM_NUM_CTX,
+            keep_alive=LLM_KEEP_ALIVE,
             reasoning=reasoning,
         )
 

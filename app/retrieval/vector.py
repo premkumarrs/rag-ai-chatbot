@@ -8,7 +8,13 @@ from typing import Any
 from langchain_ollama import OllamaEmbeddings
 from pgvector import Vector
 
-from app.config import EMBEDDING_MODEL, OLLAMA_HOST, RETRIEVAL_MIN_SIMILARITY, VECTOR_TOP_K
+from app.config import (
+    EMBEDDING_KEEP_ALIVE_SECONDS,
+    EMBEDDING_MODEL,
+    OLLAMA_HOST,
+    RETRIEVAL_MIN_SIMILARITY,
+    VECTOR_TOP_K,
+)
 from app.database import get_connection
 from app.retrieval.models import RetrievalCandidate
 
@@ -18,7 +24,11 @@ _embeddings: OllamaEmbeddings | None = None
 def get_embeddings() -> OllamaEmbeddings:
     global _embeddings
     if _embeddings is None:
-        _embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_HOST)
+        _embeddings = OllamaEmbeddings(
+            model=EMBEDDING_MODEL,
+            base_url=OLLAMA_HOST,
+            keep_alive=EMBEDDING_KEEP_ALIVE_SECONDS,
+        )
     return _embeddings
 
 

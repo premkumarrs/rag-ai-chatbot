@@ -124,6 +124,14 @@ uvicorn app.main:app --reload
 
 API docs: http://127.0.0.1:8000/docs
 
+8. **Start the chat page** (separate from the API)
+
+```powershell
+python web/server.py
+```
+
+Chat: http://127.0.0.1:5173
+
 ## OCR
 
 - OCR uses **Tesseract** through `pytesseract` and **Pillow**.
