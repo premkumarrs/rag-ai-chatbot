@@ -181,4 +181,4 @@ Tests cover document parsers, chunking, idempotent ingestion, OCR availability, 
 
 ## Project Status
 
-The current implementation includes the core RAG pipeline, multi-format ingestion with OCR, and Phase 3 intelligent hybrid retrieval (vector + keyword, fusion, lightweight reranking, retrieval confidence, and context assembly). Production load testing and advanced model-based rerankers are out of scope for now.....
+The current implementation includes the core RAG pipeline, multi-format ingestion with OCR, and Phase 3 intelligent hybrid retrieval (vector + keyword, fusion, lightweight reranking, retrieval confidence, and context assembly). Production load testing and advanced model-based rerankers are out of scope for now.
