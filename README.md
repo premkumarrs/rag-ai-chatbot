@@ -229,4 +229,4 @@ python scripts/benchmark_latency.py
 
 ## License
 
-No license file is currently included in the repository.
+MIT License
