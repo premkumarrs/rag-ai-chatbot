@@ -1,4 +1,24 @@
 import os
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    """Load optional .env values without overriding a process environment."""
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.is_file():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -39,6 +59,7 @@ LLM_KEEP_ALIVE = os.getenv("LLM_KEEP_ALIVE", "30m")
 LLM_REQUEST_TIMEOUT = _env_float("LLM_REQUEST_TIMEOUT", 120.0)
 LLM_STREAMING_ENABLED = _env_bool("LLM_STREAMING_ENABLED", True)
 LLM_REASONING_ENABLED = _env_bool("LLM_REASONING_ENABLED", False)
+LLM_WARMUP = _env_bool("LLM_WARMUP", True)
 
 # Cloud fallback (disabled by default)
 ALLOW_CLOUD_FALLBACK = _env_bool("ALLOW_CLOUD_FALLBACK", False)
@@ -54,7 +75,7 @@ OPENAI_COMPAT_API_KEY = os.getenv("OPENAI_COMPAT_API_KEY")
 # PostgreSQL + pgvector
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://raguser:ragpassword@localhost:5433/rag_ai_chatbot",
+    "",
 )
 
 # Knowledge base
@@ -86,7 +107,7 @@ MAX_CONTEXT_CHARS = _env_int("MAX_CONTEXT_CHARS", 2800)
 NEAR_DUPLICATE_OVERLAP = _env_float("NEAR_DUPLICATE_OVERLAP", 0.85)
 
 # Contact shown when the knowledge base cannot answer
-SUPPORT_CONTACT = "PLEASE_CONFIGURE_SUPPORT_NUMBER"
+SUPPORT_CONTACT = os.getenv("SUPPORT_CONTACT", "")
 
 # Keep the embedding model resident so the next question does not reload it.
 EMBEDDING_KEEP_ALIVE_SECONDS = _env_int("EMBEDDING_KEEP_ALIVE_SECONDS", 1800)

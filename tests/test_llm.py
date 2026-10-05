@@ -6,7 +6,7 @@ import logging
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.config import ALLOW_CLOUD_FALLBACK, LLM_PROVIDER
+from app.config import ALLOW_CLOUD_FALLBACK, LLM_PROVIDER, LLM_REQUEST_TIMEOUT
 from app.generator import SYSTEM_PROMPT, generate_answer
 from app.llm.base import LLMMessage, LLMProviderError, LLMResponse
 from app.llm.factory import get_llm_provider
@@ -31,6 +31,43 @@ class ProviderFactoryTests(unittest.TestCase):
             with self.assertRaises(LLMProviderError):
                 get_llm_provider()
 
+    @patch("app.llm.ollama_provider._ChatOllama")
+    def test_ollama_client_uses_configured_request_timeout(
+        self, mock_chat_ollama: MagicMock
+    ) -> None:
+        OllamaProvider()
+        self.assertEqual(
+            mock_chat_ollama.call_args.kwargs["sync_client_kwargs"],
+            {"timeout": LLM_REQUEST_TIMEOUT},
+        )
+
+
+class WebWarmupTests(unittest.TestCase):
+    @patch("web.server._post")
+    def test_warms_embedding_and_chat_models_at_their_configured_hosts(
+        self, mock_post: MagicMock
+    ) -> None:
+        from web import server
+
+        with (
+            patch.object(server, "LLM_WARMUP", True),
+            patch.object(server, "OLLAMA_HOST", "http://embedding-host"),
+            patch.object(server, "OLLAMA_BASE_URL", "http://chat-host"),
+        ):
+            server.warm_models()
+
+        self.assertEqual(mock_post.call_args_list[0].args[2], "http://embedding-host")
+        self.assertEqual(mock_post.call_args_list[1].args[2], "http://chat-host")
+
+    @patch("web.server._post")
+    def test_warmup_can_be_disabled(self, mock_post: MagicMock) -> None:
+        from web import server
+
+        with patch.object(server, "LLM_WARMUP", False):
+            server.warm_models()
+
+        mock_post.assert_not_called()
+
 
 class GeneratorTests(unittest.TestCase):
     def test_empty_chunks_return_fallback_without_llm(self) -> None:
@@ -39,6 +76,8 @@ class GeneratorTests(unittest.TestCase):
             mock_factory.assert_not_called()
         self.assertTrue(result["fallback"])
         self.assertEqual(result["sources"], [])
+        self.assertIn("your company's support team", result["answer"])
+        self.assertNotIn("PLEASE_CONFIGURE", result["answer"])
 
     @patch("app.generator.get_llm_provider")
     def test_provider_error_returns_safe_fallback(self, mock_factory: MagicMock) -> None:
@@ -192,6 +231,16 @@ class FastAPITests(unittest.TestCase):
         response = client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
+
+    @patch("app.main.init_db", side_effect=RuntimeError("database unavailable"))
+    def test_database_initialization_failure_prevents_startup(
+        self, _mock_init_db: MagicMock
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+            with TestClient(app):
+                pass
 
 
 if __name__ == "__main__":

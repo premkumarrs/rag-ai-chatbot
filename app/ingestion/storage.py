@@ -9,7 +9,7 @@ from langchain_ollama import OllamaEmbeddings
 from pgvector import Vector
 from psycopg import Connection
 
-from app.config import EMBEDDING_MODEL, OLLAMA_HOST
+from app.config import EMBEDDING_KEEP_ALIVE_SECONDS, EMBEDDING_MODEL, OLLAMA_HOST
 from app.ingestion.models import ParsedDocument
 
 
@@ -19,7 +19,11 @@ _embeddings: OllamaEmbeddings | None = None
 def get_embeddings() -> OllamaEmbeddings:
     global _embeddings
     if _embeddings is None:
-        _embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_HOST)
+        _embeddings = OllamaEmbeddings(
+            model=EMBEDDING_MODEL,
+            base_url=OLLAMA_HOST,
+            keep_alive=EMBEDDING_KEEP_ALIVE_SECONDS,
+        )
     return _embeddings
 
 

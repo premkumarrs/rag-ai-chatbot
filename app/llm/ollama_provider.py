@@ -90,6 +90,7 @@ class OllamaProvider(LLMProvider):
             num_ctx=LLM_NUM_CTX,
             keep_alive=LLM_KEEP_ALIVE,
             reasoning=reasoning,
+            sync_client_kwargs={"timeout": LLM_REQUEST_TIMEOUT},
         )
 
     @property

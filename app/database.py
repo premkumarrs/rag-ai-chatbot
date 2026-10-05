@@ -21,10 +21,12 @@ def get_connection() -> Connection:
 
 def init_db() -> None:
     """Create the pgvector extension and document/chunk tables if they do not exist."""
+    # register_vector() requires the extension to exist first.
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS documents (

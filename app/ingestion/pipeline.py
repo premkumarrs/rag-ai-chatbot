@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from app.config import DATA_DIR
-from app.database import get_connection
+from app.database import get_connection, init_db
 from app.ingestion.chunking import chunk_parsed_document
 from app.ingestion.loader import discover_files, is_supported_extension, parse_file, to_source_path
 from app.ingestion.parsers.base import file_content_hash
@@ -138,6 +138,7 @@ def run_ingestion(data_path: Path | None = None) -> IngestionReport:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    init_db()
     report = run_ingestion()
     if report.files_failed:
         raise SystemExit(1)

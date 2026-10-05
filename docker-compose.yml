@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-raguser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_ai_chatbot}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - rag_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  rag_postgres_data:

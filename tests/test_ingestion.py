@@ -201,8 +201,17 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class PartialFailureTests(unittest.TestCase):
+    @patch("app.ingestion.pipeline.embed_documents", return_value=[[0.0]])
+    @patch("app.ingestion.pipeline.replace_document_chunks")
+    @patch("app.ingestion.pipeline.upsert_document", return_value=1)
     @patch("app.ingestion.pipeline.get_connection")
-    def test_one_bad_file_does_not_stop_ingestion(self, mock_conn_factory: MagicMock) -> None:
+    def test_one_bad_file_does_not_stop_ingestion(
+        self,
+        mock_conn_factory: MagicMock,
+        mock_upsert: MagicMock,
+        mock_replace: MagicMock,
+        mock_embed: MagicMock,
+    ) -> None:
         conn = MagicMock()
         mock_conn_factory.return_value.__enter__.return_value = conn
 
@@ -214,6 +223,7 @@ class PartialFailureTests(unittest.TestCase):
 
         self.assertEqual(report.files_processed, 1)
         self.assertEqual(report.files_failed, 1)
+        mock_embed.assert_called_once()
 
 
 if __name__ == "__main__":

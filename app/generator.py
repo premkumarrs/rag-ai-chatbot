@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import TypedDict
 
-from app.config import LLM_REQUEST_TIMEOUT, SUPPORT_CONTACT
+from app.config import SUPPORT_CONTACT
 from app.llm.base import LLMMessage, LLMProviderError
 from app.llm.factory import get_llm_provider
 from app.request_context import RequestMetrics, StageTimer
@@ -31,17 +30,23 @@ class GenerationResult(TypedDict):
 
 
 def _fallback_answer() -> str:
+    support_message = _support_contact_message()
     return (
         "I couldn't find sufficient information in the available company documents "
-        f"to answer this question. Please contact customer support at {SUPPORT_CONTACT}."
+        f"to answer this question. {support_message}"
     )
 
 
 def _provider_failure_answer() -> str:
     return (
-        "The assistant is temporarily unavailable. "
-        f"Please contact customer support at {SUPPORT_CONTACT}."
+        f"The assistant is temporarily unavailable. {_support_contact_message()}"
     )
+
+
+def _support_contact_message() -> str:
+    if SUPPORT_CONTACT.strip():
+        return f"Please contact customer support at {SUPPORT_CONTACT}."
+    return "Please contact your company's support team."
 
 
 def _extract_sources(chunks: list[RetrievedChunk]) -> list[str]:
@@ -101,18 +106,16 @@ def _build_messages(user_message: str) -> list[LLMMessage]:
     ]
 
 
-def _generate_with_timeout(messages: list[LLMMessage], metrics: RequestMetrics | None):
+def _generate(messages: list[LLMMessage], metrics: RequestMetrics | None):
     provider = get_llm_provider()
     generation_timer = StageTimer()
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(provider.generate, messages)
-        try:
-            response = future.result(timeout=LLM_REQUEST_TIMEOUT)
-        except FuturesTimeout as exc:
-            raise LLMProviderError("Generation timed out.") from exc
-        except Exception as exc:
-            raise LLMProviderError("Generation failed.") from exc
+    try:
+        response = provider.generate(messages)
+    except LLMProviderError:
+        raise
+    except Exception as exc:
+        raise LLMProviderError("Generation failed.") from exc
 
     if metrics is not None:
         metrics.generation_ms = generation_timer.elapsed_ms()
@@ -143,7 +146,7 @@ def generate_answer(
         metrics.prompt_ms = prompt_timer.elapsed_ms()
 
     try:
-        response = _generate_with_timeout(messages, metrics)
+        response = _generate(messages, metrics)
     except LLMProviderError:
         return {
             "answer": _provider_failure_answer(),

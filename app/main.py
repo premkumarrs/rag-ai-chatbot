@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 import threading
 from contextlib import asynccontextmanager
@@ -14,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.config import LLM_STREAMING_ENABLED
+from app.config import LLM_STREAMING_ENABLED, LLM_WARMUP
+from app.database import init_db
 from app.llm.base import LLMMessage, LLMProviderError
 from app.rag import answer_question, stream_answer_question
 from app.request_context import REQUEST_ID_HEADER, resolve_request_id
@@ -31,7 +31,7 @@ def _warm_local_models() -> None:
     """
     if "unittest" in sys.modules:
         return
-    if os.getenv("LLM_WARMUP", "1").strip().lower() in {"0", "false", "no", "off"}:
+    if not LLM_WARMUP:
         return
     try:
         from app.llm.factory import get_llm_provider
@@ -46,6 +46,8 @@ def _warm_local_models() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    init_db()
+    logger.info("Database schema is ready.")
     threading.Thread(target=_warm_local_models, daemon=True).start()
     yield
 
@@ -132,4 +134,12 @@ def chat_stream(request_body: ChatRequest, request: Request) -> StreamingRespons
             }
             yield f"data: {json.dumps(payload)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

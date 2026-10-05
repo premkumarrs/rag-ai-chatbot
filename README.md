@@ -1,184 +1,232 @@
 # RAG AI Chatbot
 
-A company-oriented Retrieval-Augmented Generation (RAG) chatbot that answers questions from internal documents. The system retrieves relevant knowledge-base content, grounds responses in that material, and falls back to a support message when the documents do not contain enough information.
+## Badges
 
-## Current Features
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![Ollama](https://img.shields.io/badge/Ollama-local%20inference-111111)](https://ollama.com/)
 
-- FastAPI backend
-- Retrieval-Augmented Generation (RAG)
-- PostgreSQL + pgvector vector storage
-- Ollama / Qwen local LLM
-- Nomic embeddings (`nomic-embed-text`)
-- Multi-format ingestion: PDF, DOCX, TXT, Markdown, CSV, XLSX, PPTX, HTML, JSON
-- OCR for scanned PDF pages and images (Tesseract)
-- Structure-aware document chunking
-- Document metadata (page, sheet, slide, section, etc.)
-- SHA-256 content hashing and idempotent ingestion
-- Similarity-threshold retrieval with grounded fallback when confidence is low
-- Hybrid retrieval (vector + PostgreSQL keyword/full-text)
-- Lightweight query normalization and deterministic reranking
-- Retrieval confidence (HIGH / MEDIUM / LOW) with context assembly
-- Streaming chat endpoint (`POST /chat/stream`)
-- LLM provider abstraction (Ollama today; swappable for a future company GPU endpoint)
+## About the Project
 
-## Architecture
+RAG AI Chatbot answers questions using documents placed in the local `data/` directory. It extracts and chunks document text, stores Ollama-generated embeddings and metadata in PostgreSQL with pgvector, and retrieves relevant passages using both vector similarity and PostgreSQL full-text/technical-term search. The results are fused, deterministically reranked, checked for retrieval confidence, and assembled into a bounded context for local Qwen generation. Responses include source paths; low-confidence retrieval returns a support fallback instead of generating from unrelated context.
 
+The repository includes a FastAPI API and a separate browser chat page. Document ingestion is an offline command; the API initializes the database schema at startup.
+
+## Architecture Flowchart
+
+```mermaid
+flowchart TD
+    subgraph Ingestion
+        Files["Documents in data/"] --> Parse["Format parsers and optional OCR"]
+        Parse --> Chunk["Structure-aware chunking"]
+        Chunk --> Embed["Ollama embeddings: nomic-embed-text"]
+        Embed --> Store["PostgreSQL + pgvector<br/>documents, chunks, metadata, full-text index"]
+    end
+
+    subgraph Question answering
+        User["User"] --> Web["Browser chat<br/>static server :5173"]
+        Web --> API["FastAPI<br/>:8000"]
+        API --> RAG["RAG orchestration"]
+        RAG --> Normalize["Query normalization"]
+        Normalize --> Vector["Vector search<br/>Ollama embedding + pgvector"]
+        Normalize --> Keyword["PostgreSQL full-text<br/>and technical-term search"]
+        Store --> Vector
+        Store --> Keyword
+        Vector --> Fusion["Reciprocal Rank Fusion"]
+        Keyword --> Fusion
+        Fusion --> Rerank["Deterministic reranking"]
+        Rerank --> Confidence["Retrieval confidence"]
+        Confidence{"Retrieval confidence"} -->|MEDIUM or HIGH| Context["Bounded context assembly"]
+        Confidence -->|LOW| Fallback["Grounded support fallback"]
+        Context --> LLM["Ollama chat model<br/>Qwen"]
+        LLM --> Response["Grounded answer, sources,<br/>fallback status"]
+        Fallback --> Response
+        Response --> API
+        API --> Web
+    end
 ```
-Documents
-  → Parsing / OCR
-  → Chunking
-  → Embeddings
-  → PostgreSQL + pgvector
 
-User Question
-  → Query normalization
-  → Hybrid retrieval (vector + keyword)
-  → Candidate fusion
-  → Lightweight reranking
-  → Retrieval confidence
-  → Context assembly
-  → Qwen LLM
-  → Grounded Answer
+## Tech Stack Table
+
+| Category | Technology | Purpose |
+|---|---|---|
+| Language | Python 3.12 | API, ingestion, retrieval, and model integration |
+| API | FastAPI, Uvicorn | JSON chat, server-sent-event streaming, and HTTP service |
+| RAG integration | LangChain | Ollama chat and embedding clients, document and chunk utilities |
+| Local inference | Ollama, Qwen (`qwen3.5:4b`), `nomic-embed-text` | Answer generation and 768-dimensional document/query embeddings |
+| Database | PostgreSQL 16, pgvector | Document/chunk storage, vector similarity, and full-text search |
+| Database service | Docker Compose | Runs the local PostgreSQL/pgvector container |
+| Document parsing | pypdf, python-docx, openpyxl, python-pptx, Beautiful Soup | Extract text and structure from supported document formats |
+| OCR | Tesseract, pytesseract, Pillow | Optional text extraction from images and scanned PDF content |
+| Web chat | HTML, CSS, JavaScript | Browser interface served separately by Python's HTTP server |
+
+## Repository Structure
+
+```text
+rag-ai-chatbot/
+├── app/
+│   ├── ingestion/       # File discovery, parsers, OCR, chunking, storage
+│   ├── retrieval/       # Normalization, search, fusion, reranking, context
+│   ├── llm/             # Provider interface and Ollama implementation
+│   ├── main.py          # FastAPI endpoints and application lifespan
+│   ├── rag.py           # Question-answering orchestration
+│   ├── database.py      # PostgreSQL/pgvector schema and connections
+│   └── config.py        # Environment-based configuration
+├── data/                # Local documents; contents are ignored by Git
+├── scripts/
+│   └── benchmark_latency.py
+├── tests/               # Unit tests and parser fixtures
+├── web/                 # Static chat interface and local web server
+├── .env.example
+├── docker-compose.yml
+├── requirements.txt
+└── README.md
 ```
 
-The LLM layer uses a provider interface so the inference backend can later be switched to another approved local or company-hosted model endpoint without rewriting the RAG pipeline.
+## Prerequisites
 
-### Retrieval
+- Python 3.12.
+- Docker Engine/Desktop with the Docker Compose plugin, for the PostgreSQL 16 + pgvector service defined in `docker-compose.yml`.
+- Ollama installed and running locally. The default endpoints are `http://localhost:11434`.
+- Ollama models `qwen3.5:4b` (chat) and `nomic-embed-text` (embeddings).
+- Tesseract OCR is optional. Install it and make its executable available on `PATH` only if you need OCR for images or scanned PDF content.
 
-- **Vector retrieval** — semantic search over pgvector embeddings
-- **Keyword retrieval** — PostgreSQL full-text search plus exact technical-term matching
-- **Hybrid fusion** — combines both result sets (Reciprocal Rank Fusion)
-- **Lightweight reranking** — deterministic reordering of the small candidate set (no extra LLM call)
-- **Retrieval confidence** — HIGH / MEDIUM / LOW based on candidate quality; LOW triggers grounded fallback
-- **Grounded fallback** — answers only from retrieved company context; otherwise returns a support message
+The API, ingestion command, and chat page run as local Python processes. PostgreSQL is the service provided by Docker Compose; Ollama and Tesseract are installed separately.
 
-Query normalization is deterministic (informal wording, light typos). Technical identifiers such as `ADXL345`, `ESP32`, and `C-MAPSS` are preserved.
+## Installation & Configuration
 
-## Supported Documents
+The commands below use PowerShell on Windows. Run them from the repository root.
 
-| Format | Extensions |
-|---|---|
-| PDF | `.pdf` |
-| Word | `.docx` |
-| Plain text | `.txt` |
-| Markdown | `.md` |
-| CSV | `.csv` |
-| Excel | `.xlsx` |
-| PowerPoint | `.pptx` |
-| HTML | `.html`, `.htm` |
-| JSON | `.json` |
-| Images (OCR) | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff` |
+1. Clone the repository and enter it:
 
-Place files directly under `data/` (subfolders are ignored). Ingestion runs offline before queries. The `data/` directory is gitignored—do not commit company documents.
+   ```powershell
+   git clone https://github.com/premkumarrs/rag-ai-chatbot.git
+   Set-Location rag-ai-chatbot
+   ```
 
-## Setup
+2. Create and activate a Python environment, then install the project dependencies:
 
-**Requirements:** Python 3.12, Docker, Ollama
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   python -m pip install -r requirements.txt
+   ```
 
-1. **Create and activate a virtual environment**
+3. Create a local environment file and configure the database password:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+   Set `POSTGRES_PASSWORD` and `DATABASE_URL` in `.env`; use the same local, URL-safe password in both. Set `DATABASE_URL` to a PostgreSQL connection URI for user `raguser` on `localhost:5433`, database `rag_ai_chatbot`. `.env` is ignored by Git. The application reads it without overriding variables already set in the process environment. Update `DATABASE_URL` if you change the database connection, `OLLAMA_HOST` for embeddings, `OLLAMA_BASE_URL` for chat generation, `CHAT_MODEL` or `EMBEDDING_MODEL` to select different installed models, and `SUPPORT_CONTACT` for fallback messages. `LLM_PROVIDER` defaults to `ollama`; the other provider classes are not implemented for generation. Set `LLM_WARMUP=0` to disable startup model warmup.
+
+4. Start PostgreSQL with pgvector:
+
+   ```powershell
+   docker compose up -d
+   ```
+
+   Compose publishes PostgreSQL on `127.0.0.1:5433` (container port `5432`) and persists its data in the `rag_postgres_data` volume. The local database is `rag_ai_chatbot`; its password comes from the ignored `.env` file. The database initialization command below creates the pgvector extension and application tables; ingestion also initializes the schema automatically.
+
+5. [Install Ollama](https://ollama.com/download) for your operating system, start it, and pull the configured models:
+
+   ```powershell
+   ollama pull qwen3.5:4b
+   ollama pull nomic-embed-text
+   ```
+
+   If Ollama is not already running as a service, start it in a separate terminal with `ollama serve`.
+
+6. Initialize the database schema:
+
+   ```powershell
+   python -c "from app.database import init_db; init_db()"
+   ```
+
+7. (Optional) Install Tesseract OCR on Windows and verify it is on `PATH`:
+
+   ```powershell
+   winget install UB-Mannheim.TesseractOCR
+   tesseract --version
+   ```
+
+8. Place supported documents directly in `data/` (not in subdirectories), then ingest them:
+
+   ```powershell
+   python -m app.ingest
+   ```
+
+   Supported extensions are `.pdf`, `.docx`, `.txt`, `.md`, `.markdown`, `.csv`, `.xlsx`, `.pptx`, `.html`, `.htm`, `.json`, `.png`, `.jpg`, `.jpeg`, `.tif`, and `.tiff`. The `data/` contents are ignored by Git; do not add company documents to version control.
+
+## How to Run
+
+Run the following commands from the repository root with the virtual environment activated. Keep PostgreSQL and Ollama running.
+
+Start or check the database service:
 
 ```powershell
-cd rag-ai-chatbot
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+docker compose up -d
+docker compose ps
 ```
 
-2. **Install dependencies**
+Ingest new or changed documents (the command initializes the schema when needed):
 
 ```powershell
-pip install -r requirements.txt
-```
-
-3. **Start PostgreSQL with pgvector**
-
-```powershell
-docker start rag-postgres
-```
-
-4. **Configure environment variables** (optional; defaults work for local development)
-
-```powershell
-$env:DATABASE_URL = "postgresql://USER:PASSWORD@localhost:5433/rag_ai_chatbot"
-$env:OLLAMA_HOST = "http://localhost:11434"
-```
-
-5. **Pull Ollama models**
-
-```powershell
-ollama pull qwen3.5:4b
-ollama pull nomic-embed-text
-```
-
-6. **Initialize the database and ingest documents**
-
-```powershell
-python -c "from app.database import init_db; init_db()"
 python -m app.ingest
 ```
 
-7. **Start the API**
+### API
+
+Start the API in its own terminal:
 
 ```powershell
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-API docs: http://127.0.0.1:8000/docs
+The API initializes the database schema during startup and will fail to start if initialization fails. Available endpoints:
 
-8. **Start the chat page** (separate from the API)
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Basic service health |
+| `POST` | `/chat` | Return a grounded JSON answer |
+| `POST` | `/chat/stream` | Stream answer events as server-sent events |
+
+Interactive API documentation is available at <http://127.0.0.1:8000/docs>; the health endpoint is <http://127.0.0.1:8000/health>.
+
+### Web Chat
+
+In another terminal, start the separate static web server:
 
 ```powershell
 python web/server.py
 ```
 
-Chat: http://127.0.0.1:5173
+Open <http://127.0.0.1:5173>. The page sends streaming chat requests to the API at `http://127.0.0.1:8000`; both processes must be running.
 
-## OCR
-
-- OCR uses **Tesseract** through `pytesseract` and **Pillow**.
-- Normal PDF text extraction is attempted first.
-- OCR runs only when extracted text is insufficient (scanned pages or image files).
-- Tesseract must be installed separately on Windows:
-
-```powershell
-winget install UB-Mannheim.TesseractOCR
-```
-
-## API
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Service health check |
-| POST | `/chat` | Question → grounded JSON answer |
-| POST | `/chat/stream` | Question → streamed SSE response |
-
-**Example — POST /chat**
-
-```json
-{
-  "question": "What is covered under the product warranty?"
-}
-```
-
-**Response**
-
-```json
-{
-  "answer": "...",
-  "sources": ["data/warranty.docx"],
-  "fallback": false
-}
-```
-
-When `fallback` is `true`, the knowledge base did not contain sufficient relevant content.
-
-## Testing
+Run the unit tests:
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -q
 ```
 
-Tests cover document parsers, chunking, idempotent ingestion, OCR availability, hybrid retrieval (normalization, fusion, reranking, confidence, context assembly), LLM provider wiring, and RAG orchestration.
+Optionally measure local inference and retrieval latency. This requires PostgreSQL, Ollama, and ingested documents:
 
-## Project Status
+```powershell
+python scripts/benchmark_latency.py
+```
 
-The current implementation includes the core RAG pipeline, multi-format ingestion with OCR, and Phase 3 intelligent hybrid retrieval (vector + keyword, fusion, lightweight reranking, retrieval confidence, and context assembly). Production load testing and advanced model-based rerankers are out of scope for now.
+## Key Features
+
+- Ingests PDF, DOCX, TXT, Markdown, CSV, XLSX, PPTX, HTML, and JSON documents, plus images for OCR.
+- Uses format-specific parsing, optional Tesseract OCR, structure-aware chunking, source metadata, and SHA-256 hashes to skip unchanged files.
+- Stores document chunks and 768-dimensional embeddings in PostgreSQL with pgvector; supports vector similarity and PostgreSQL full-text/technical-term search.
+- Combines vector and keyword results with Reciprocal Rank Fusion, deterministic reranking, confidence assessment, duplicate filtering, and bounded context assembly.
+- Generates context-grounded responses with the local Ollama Qwen model, reports source paths, and falls back when retrieval confidence is low.
+- Provides JSON and streaming chat endpoints through FastAPI and a separate browser-based chat interface.
+- Includes a latency benchmark for local embedding, retrieval, and streamed-answer measurements.
+
+## License
+
+No license file is currently included in the repository.
